@@ -14,14 +14,22 @@ import numpy as np
 
 from utils.common import read_file
 from utils.constants import REPO_NAME
-from utils.docker_utils import copy_to_container, log_container_output
 from utils.domain_utils import (
     can_domain_ensembled,
     get_domain_score_key,
     get_domain_splits,
     get_domain_stagedeval_frac,
 )
-from utils.git_utils import commit_repo, get_git_commit_hash
+
+# Lazy imports — these require docker/GitPython which are only needed for
+# container-based execution (not needed for ml-optimizer's Claude Code integration)
+def _get_docker_utils():
+    from utils.docker_utils import copy_to_container, log_container_output
+    return copy_to_container, log_container_output
+
+def _get_git_utils():
+    from utils.git_utils import commit_repo, get_git_commit_hash
+    return commit_repo, get_git_commit_hash
 
 
 def is_starting_node(genid):
@@ -223,6 +231,7 @@ def setup_initial_gen(
     # Resume from previous run
     if resume:
         root_dir = os.path.abspath(os.path.join(output_dir, f"gen_initial/{REPO_NAME}"))
+        _, get_git_commit_hash = _get_git_utils()
         commit_hash = get_git_commit_hash(root_dir)
         return root_dir, commit_hash
 
@@ -364,6 +373,7 @@ def setup_initial_gen(
         os.remove(os.path.join(root_dir, "run_meta_agent.py"))
 
     # Get commit hash
+    commit_repo, _ = _get_git_utils()
     commit_hash = commit_repo(root_dir)
 
     # Return info
@@ -436,6 +446,7 @@ def process_meta_patch_files(meta_patch_files, output_dir, reset_task_agent=Fals
     return new_meta_patch_files
 
 def apply_diffs_container(container, patch_files, repo_name=REPO_NAME, verbose=True):
+    copy_to_container, log_container_output = _get_docker_utils()
     # Apply all diffs
     patch_files = patch_files or []
     for patch_file in patch_files:
@@ -606,6 +617,7 @@ def get_latest_can_select_parent(archive, output_dir, trunc_genid=None):
     return None
 
 def run_commands_to_check_compilation(container, run_baseline=None, edit_select_parent=False):
+    _, log_container_output = _get_docker_utils()
     # Run commands to check if the agents are compilable
     if run_baseline and "dgm" in run_baseline:
         command = [
