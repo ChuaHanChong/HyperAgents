@@ -1,4 +1,10 @@
+import os
+
+
 def get_domain_score_key(domain):
+    # ML optimization domain (configurable via env var)
+    if domain == "ml":
+        return os.environ.get("HYPERAGENT_METRIC", "loss")
     # Human preferences domains
     if domain in ["search_arena", "paper_review", "imo_grading"]:
         return "overall_accuracy"
@@ -17,6 +23,8 @@ def get_domain_score_key(domain):
 
 
 def get_domain_splits(domain, eval_test=False):
+    if domain == "ml":
+        return ["train"]
     # Human preferences domains
     if domain in ["search_arena", "paper_review", "imo_grading"]:
         splits = ["train", "val"]
@@ -38,6 +46,8 @@ def get_domain_splits(domain, eval_test=False):
 
 
 def can_domain_ensembled(domain):
+    if domain == "ml":
+        return False
     # Human preferences domains
     if domain in ["search_arena", "paper_review"]:
         return True
@@ -122,6 +132,8 @@ def get_domain_stagedeval_samples(domain):
 
 
 def get_domain_stagedeval_frac(domain):
+    if domain == "ml":
+        return float(os.environ.get("HYPERAGENT_STAGED_FRAC", "0.1"))
     # NOTE: this is hardcoded wrt get_domain_stagedeval_samples and default domain configs
     # Human preferences domains
     if domain in ["search_arena", "paper_review"]:

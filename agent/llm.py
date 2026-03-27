@@ -1,12 +1,16 @@
-import backoff
 import os
 from typing import Tuple
-import requests
-import litellm
-from dotenv import load_dotenv
 import json
 
-load_dotenv()
+# Claude Code mode — bypass litellm entirely, use file-based handoff
+_CLAUDE_CODE_MODE = os.environ.get("HYPERAGENT_PROVIDER", "").lower() == "claude_code"
+
+if not _CLAUDE_CODE_MODE:
+    import backoff  # type: ignore[import-untyped]
+    import requests  # type: ignore[import-untyped]
+    import litellm  # type: ignore[import-untyped]
+    from dotenv import load_dotenv  # type: ignore[import-untyped]
+    load_dotenv()
 
 MAX_TOKENS = 16384
 
@@ -25,28 +29,39 @@ GEMINI_3_MODEL = "gemini/gemini-3-pro-preview"
 GEMINI_MODEL = "gemini/gemini-2.5-pro"
 GEMINI_FLASH_MODEL = "gemini/gemini-2.5-flash"
 
-litellm.drop_params=True
 
-@backoff.on_exception(
-    backoff.expo,
-    (requests.exceptions.RequestException, json.JSONDecodeError, KeyError),
-    max_time=600,
-    max_value=60,
-)
-def get_response_from_llm(
+def _get_response_claude_code(
+    msg: str,
+    model: str = "claude_code",
+    temperature: float = 0.0,
+    max_tokens: int = MAX_TOKENS,
+    msg_history=None,
+) -> Tuple[str, list, dict]:
+    """Route LLM calls through file-based handoff to Claude Code."""
+    from agent.file_handoff_provider import query_file_handoff
+    return query_file_handoff(
+        msg=msg,
+        system_msg="",
+        model_name=model,
+        msg_history=msg_history,
+    )
+
+
+def _get_response_litellm(
     msg: str,
     model: str = OPENAI_MODEL,
     temperature: float = 0.0,
     max_tokens: int = MAX_TOKENS,
     msg_history=None,
 ) -> Tuple[str, list, dict]:
+    """Route LLM calls through litellm (original behavior)."""
     if msg_history is None:
         msg_history = []
 
     # Convert text to content, compatible with LITELLM API
     msg_history = [
-        {**msg, "content": msg.pop("text")} if "text" in msg else msg
-        for msg in msg_history
+        {**m, "content": m.pop("text")} if "text" in m else m
+        for m in msg_history
     ]
 
     new_msg_history = msg_history + [{"role": "user", "content": msg}]
@@ -80,11 +95,24 @@ def get_response_from_llm(
 
     # Convert content to text, compatible with MetaGen API
     new_msg_history = [
-        {**msg, "text": msg.pop("content")} if "content" in msg else msg
-        for msg in new_msg_history
+        {**m, "text": m.pop("content")} if "content" in m else m
+        for m in new_msg_history
     ]
 
     return response_text, new_msg_history, {}
+
+
+# Build the public API — apply backoff decorator only in litellm mode
+if _CLAUDE_CODE_MODE:
+    get_response_from_llm = _get_response_claude_code
+else:
+    litellm.drop_params = True
+    get_response_from_llm = backoff.on_exception(
+        backoff.expo,
+        (requests.exceptions.RequestException, json.JSONDecodeError, KeyError),
+        max_time=600,
+        max_value=60,
+    )(_get_response_litellm)
 
 
 if __name__ == "__main__":

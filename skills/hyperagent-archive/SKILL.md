@@ -1,95 +1,104 @@
 ---
 name: hyperagent-archive
-description: Update the evolutionary code archive with evaluation results and track lineage, operator effectiveness, and mutation outcomes.
+description: Update the Hyperagent evolutionary code archive with evaluation results and track lineage, operator effectiveness, and mutation outcomes.
 disable-model-invocation: true
 user-invocable: false
 ---
 
 # Hyperagent Archive Skill
 
-## Overview
+## When to Use
+Use this skill when:
+- Adding a new evaluated variant to the archive
+- Updating fitness scores after parameter tuning
+- Querying archive statistics, top entries, or lineage
+- Pruning dead lineages to keep the archive focused
 
-Update the evolutionary code archive after a generation is evaluated. Records fitness scores, lineage, mutation type, and operator effectiveness. This maintains the population that drives parent selection for future generations.
+Do not use this skill when:
+- The archive doesn't exist yet (use hyperagent-init first)
+- You need to evaluate code (use hyperagent-eval)
+
+## What is Hyperagent Archive?
+This is the **Merging** operation of the DGM (Diversity-Generation-Merging) framework. It maintains the evolutionary population by recording fitness scores, lineage, mutation types, and operator effectiveness. The archive drives parent selection for future generations.
+
+Repo and documentation: https://github.com/facebookresearch/Hyperagents
 
 ## Input Parameters
 
-- `exp_root`: Path to experiments directory
+- `output_dir`: Path to the Hyperagent output directory
 - `genid`: Generation ID of the evaluated variant
 - `parent_genid`: Parent's genid
 - `code_branch`: Git branch name
-- `mutation_type`: `"llm_patch"` | `"shinka_evolve"` | `"research_implement"`
+- `mutation_type`: The mutation operator used (e.g., `"llm_patch"`, `"external_tool"`, `"delegation"`)
 - `mutation_description`: Human-readable description of what was changed
 - `fitness_score`: Final metric value (from full evaluation or staged eval)
-- `staged_score`: Staged eval score (if Stage 1 was run)
 - `status`: `"evaluated"` | `"filtered"` | `"failed"`
-- `best_exp_id`: ID of the best experiment result for this variant
-- `best_hp_config`: HP config that achieved the best result (if HP-tuned)
+
+## Helper Script
+
+The `archive_utils.py` script provides 7 subcommands:
+
+```bash
+export HYPERAGENT_METRIC=<metric_name>
+
+# Add a new entry
+python skills/hyperagent-archive/scripts/archive_utils.py add --output-dir <output_dir> '<json>'
+
+# Update fitness after parameter tuning
+python skills/hyperagent-archive/scripts/archive_utils.py update-fitness --output-dir <output_dir> <genid> <score> [--exp-id <id>]
+
+# Query archive statistics
+python skills/hyperagent-archive/scripts/archive_utils.py stats --output-dir <output_dir>
+
+# Get top N entries by fitness
+python skills/hyperagent-archive/scripts/archive_utils.py best --output-dir <output_dir> [-n 5]
+
+# Trace lineage chain
+python skills/hyperagent-archive/scripts/archive_utils.py lineage --output-dir <output_dir> <genid>
+
+# Operator effectiveness stats (used by hyperagent-generate to choose mutation operator)
+python skills/hyperagent-archive/scripts/archive_utils.py operator-stats --output-dir <output_dir>
+# Output: {"llm_patch": {"attempts": 5, "improvements": 3, "improvement_rate": 0.6, "mean_score": 0.82, "best_score": 0.87}, ...}
+
+# Prune dead lineages
+python skills/hyperagent-archive/scripts/archive_utils.py prune --output-dir <output_dir>
+```
 
 ## Step 1: Add Archive Entry
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> add '{
+python skills/hyperagent-archive/scripts/archive_utils.py add --output-dir <output_dir> '{
   "genid": "<genid>",
   "parent_genid": "<parent_genid>",
   "code_branch": "<code_branch>",
   "mutation_type": "<mutation_type>",
   "mutation_description": "<description>",
   "fitness_score": <score_or_null>,
-  "staged_score": <staged_score_or_null>,
-  "best_hp_config": <config_or_null>,
-  "best_exp_id": "<exp_id_or_null>",
   "status": "<status>"
 }'
 ```
 
-The adapter auto-computes lineage (from parent's lineage + this genid), lineage_depth, created_at, and increments the parent's `num_children`.
+The script auto-computes lineage from the parent, sets `created_at`, and increments the parent's `num_children`.
 
-## Step 1b: Update Fitness After HP Tuning
+## Step 1b: Update Fitness After Tuning
 
-After HP tuning completes on a code variant and produces a better result than the initial staged eval, update the archive entry's fitness score:
-
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> update-fitness <genid> <new_fitness> [best_exp_id] [best_hp_config_json]
-```
-
-This ensures parent selection reflects HP-tuned results, not just initial staged eval scores. Without this, the archive is blind to HP improvements and may under-prioritize variants that became strong after tuning.
-
-## Step 2: Log to Behavioral Memory
-
-If the mutation improved over the parent, log the effective pattern:
+After parameter tuning produces a better result than the initial evaluation, update the archive entry's fitness:
 
 ```bash
-python3 scripts/goal_memory.py <exp_root> log-behavior hyperagent_mutation '{
-  "genid": "<genid>",
-  "mutation_type": "<mutation_type>",
-  "improvement_pct": <pct>,
-  "parent_fitness": <parent_score>,
-  "child_fitness": <child_score>,
-  "insight": "<what made this mutation effective>"
-}'
+python skills/hyperagent-archive/scripts/archive_utils.py update-fitness --output-dir <output_dir> <genid> <new_fitness> [--exp-id <best_exp_id>]
 ```
 
-## Step 3: Update Research Agenda (if applicable)
+This ensures parent selection reflects tuned results, not just initial scores. Without this, the archive may under-prioritize variants that improved after tuning.
 
-If the mutation was based on a research technique:
+## Step 2: Report Improvement Context
+
+If the mutation improved over the parent, include in the output: `genid`, `mutation_type`, `improvement_pct`, `parent_fitness`, `child_fitness`, and `insight`. The caller can use this for behavioral logging.
+
+## Step 3: Report Archive State
 
 ```bash
-python3 scripts/error_tracker.py <exp_root> agenda update '<technique_name>' '<status: tried|improved|dead_end>'
+python skills/hyperagent-archive/scripts/archive_utils.py stats --output-dir <output_dir>
 ```
-
-If the mutation failed completely, consider adding to the dead-end catalog:
-
-```bash
-python3 scripts/error_tracker.py <exp_root> dead-end add '<technique_name>' '<reason>'
-```
-
-## Step 4: Report Archive State
-
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> stats
-```
-
-Report current archive statistics to the orchestrator for decision-making.
 
 ## Output Format
 
@@ -103,15 +112,24 @@ Report current archive statistics to the orchestrator for decision-making.
     "filtered": 1,
     "failed": 1,
     "best_score": 0.87,
-    "mean_score": 0.84,
-    "max_lineage_depth": 3
+    "mean_score": 0.84
   }
 }
 ```
 
+## Entry Status and Parent Eligibility
+
+The `status` field determines whether an entry can be selected as a parent in future generations:
+
+- **`evaluated`** — Full evaluation completed. **Can be selected as parent.**
+- **`filtered`** — Staged eval failed (below adaptive threshold). Archived for reference but **cannot be selected as parent.**
+- **`failed`** — Training crashed or diverged. Archived for debugging but **cannot be selected as parent.**
+
+Filtered and failed entries are still valuable — they prevent the archive from re-exploring the same dead paths.
+
 ## Important Rules
 
-- **Always archive, even failures.** Failed and filtered entries are valuable — they prevent the archive from re-exploring dead paths.
-- **Lineage is automatic.** The adapter computes lineage from the parent. Don't construct it manually.
-- **Concurrent safety.** The adapter uses file locks. Multiple agents can safely archive simultaneously.
-- **Dead-end logging.** If ALL experiments on a branch fail (diverge, timeout, or error), add the technique to dead-ends to prevent future re-proposals.
+- **Always archive, even failures.** Failed and filtered entries prevent re-exploring dead paths.
+- **Lineage is automatic.** The script computes lineage from the parent. Don't construct it manually.
+- **Concurrent safety.** The script uses file locks for atomic updates.
+- **Update fitness after tuning.** Call `update-fitness` so parent selection reflects the best known result for each variant.

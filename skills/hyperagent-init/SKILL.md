@@ -1,61 +1,75 @@
 ---
 name: hyperagent-init
-description: Create the evolutionary code archive from baseline results and existing implementation branches.
+description: Create the evolutionary code archive from baseline results and optional seed entries for Hyperagent archive-based code search.
 disable-model-invocation: true
 user-invocable: false
 ---
 
 # Hyperagent Init Skill
 
-## Overview
+## When to Use
+Use this skill when:
+- Starting the first Hyperagent evolutionary run (archive doesn't exist)
+- A baseline has been established and you need to seed the archive
+- Existing code variants should be added as initial population members
 
-Create the initial code archive (`experiments/code-archive.jsonl`) from baseline results and any existing implementation branches from Phase 6. This seeds the evolutionary population for archive-based code search.
+Do not use this skill when:
+- The archive already exists (init is idempotent but redundant)
+- You're in the middle of an evolutionary run (use hyperagent-archive to add entries)
+
+## What is Hyperagent Init?
+This skill bootstraps the evolutionary archive for Hyperagents' DGM (Diversity-Generation-Merging) framework. It creates the initial population from a baseline entry and optionally seeds additional entries from prior work.
+
+Repo and documentation: https://github.com/facebookresearch/Hyperagents
 
 ## Input Parameters
 
-- `project_root`: Path to the user's project
-- `exp_root`: Path to experiments directory (e.g., `<project_root>/experiments`)
+- `output_dir`: Path to the Hyperagent output directory (will contain `archive.jsonl` and `gen_X/` dirs)
+- `baseline_path` (optional): Path to a JSON file with baseline metrics. If not provided, the script searches common locations relative to the output dir.
 
 ## Steps
 
 ### Step 1: Initialize Archive from Baseline
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> init
+export HYPERAGENT_METRIC=<metric_name>
+python skills/hyperagent-init/scripts/init_archive.py --output-dir <output_dir> [--baseline-path <path>]
 ```
 
-This reads `experiments/results/baseline.json` to create gen-000, and seeds any validated branches from `experiments/results/implementation-manifest.json` as gen-001, gen-002, etc.
+The script reads the baseline JSON (expects `{"metrics": {...}}` format) and creates `gen_initial/` with metadata and an eval report containing the baseline metric values.
+
+If a seeding manifest exists (the script checks `<output_dir>/../results/implementation-manifest.json`), validated entries are seeded as additional archive members. The manifest format expects `{"proposals": [{"status": "validated", "branch": "...", "name": "..."}]}`.
 
 ### Step 2: Verify Archive
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> stats
+python skills/hyperagent-archive/scripts/archive_utils.py stats --output-dir <output_dir>
 ```
 
-Confirm the archive was created and has the expected number of entries.
+Confirm the archive was created with the expected number of entries.
 
-### Step 3: Seed from Existing Experiment Results (Optional)
+### Step 3: Seed from Existing Results (Optional)
 
-If Phase 7 HP tuning has already produced experiment results with different code branches, update the archive with fitness scores:
+If prior experiment results exist with different code branches, update the archive:
 
-For each unique `code_branch` in `experiments/results/exp-*.json`:
-1. Find the best experiment result for that branch
-2. Call `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> add '<json>'` with the branch info and best metric as `fitness_score`
+For each existing variant with an evaluation score:
+```bash
+python skills/hyperagent-archive/scripts/archive_utils.py add --output-dir <output_dir> '<json>'
+```
 
-This ensures the archive reflects all prior work, not just Phase 6 branches.
+This ensures the archive reflects all prior work.
 
 ## Output
 
 ```json
 {
   "status": "initialized",
-  "entries": 5,
-  "archive_path": "experiments/code-archive.jsonl"
+  "entries": 5
 }
 ```
 
 ## Important Rules
 
-- **Idempotent**: If the archive already exists, report `already_initialized` and do not modify it.
-- **Baseline required**: If `baseline.json` doesn't exist, report an error. The archive needs a gen-000 reference point.
-- **Branch validation**: Only seed branches that still exist in git (`git branch --list 'ml-opt/*'`). Skip deleted branches.
+- **Idempotent**: If the archive already exists, reports `already_initialized` and does not modify it.
+- **Baseline recommended**: If no baseline file is found, initializes with `fitness=0.0` and emits a warning.
+- **Branch validation**: When seeding from prior variants, only include branches that still exist in git. Skip deleted branches.

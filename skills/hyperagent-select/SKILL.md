@@ -1,25 +1,34 @@
 ---
 name: hyperagent-select
-description: Select a parent from the evolutionary code archive using Hyperagents' parent selection algorithms.
+description: Select a parent from the evolutionary code archive using Hyperagents' parent selection algorithms (sigmoid score weighting + diversity penalty).
 disable-model-invocation: true
 user-invocable: false
 ---
 
 # Hyperagent Select Skill
 
-## Overview
+## When to Use
+Use this skill when:
+- Starting a new generation and need to pick a parent variant
+- The archive has been initialized and contains evaluated entries
 
-Select a parent code variant from the archive for the next generation of evolutionary code search. Uses Hyperagents' exact parent selection algorithms (sigmoid score weighting + diversity penalty).
+Do not use this skill when:
+- The archive is empty (use hyperagent-init first)
+- You're evaluating or archiving results (use hyperagent-eval or hyperagent-archive)
+
+## What is Hyperagent Select?
+This is the **Diversity** operation of the DGM (Diversity-Generation-Merging) framework. It selects a parent code variant from the archive using Hyperagents' exact parent selection algorithms — sigmoid score weighting with optional diversity penalty to prevent lineage collapse.
+
+Repo and documentation: https://github.com/facebookresearch/Hyperagents
 
 ## Input Parameters
 
-- `exp_root`: Path to experiments directory
+- `output_dir`: Path to the Hyperagent output directory
 - `strategy`: Selection strategy (default: `score_child_prop`)
-- `archive_stats`: Optional stats from analyze skill to inform strategy choice
 
 ## Step 1: Choose Strategy
 
-If no strategy is specified, choose based on archive size (recommended by analyze skill):
+If no strategy is specified, choose based on archive size:
 
 | Archive Size | Recommended Strategy | Rationale |
 |---|---|---|
@@ -30,7 +39,8 @@ If no strategy is specified, choose based on archive size (recommended by analyz
 ## Step 2: Select Parent
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> select-parent <strategy>
+export HYPERAGENT_METRIC=<metric_name>
+python skills/hyperagent-select/scripts/select_parent.py --output-dir <output_dir> --strategy <strategy>
 ```
 
 ### Five Selection Strategies
@@ -45,6 +55,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/hyperagent_adapter.py <exp_root> select-pa
 
 The sigmoid function concentrates probability on above-average entries while giving some chance to lower-scoring variants. The diversity penalty (`exp(-(children/8)³)`) reduces the probability of parents that already have many children, preventing the archive from collapsing to a single lineage.
 
+Child counts are dynamically computed by scanning metadata for entries whose `parent_genid` matches each candidate — they are not stored separately. Example impact: 0 children → penalty 1.0 (full weight), 8 children → penalty ~0.37, 16 children → penalty ~0.008 (strongly disfavored).
+
 ## Step 3: Return Selection
 
 Output the selected parent's genid, code branch, and fitness score for use by `hyperagent-generate`.
@@ -54,7 +66,7 @@ Output the selected parent's genid, code branch, and fitness score for use by `h
 ```json
 {
   "genid": "gen-003",
-  "code_branch": "ml-opt/gen-003-attention-v2",
+  "code_branch": "gen-003-attention-v2",
   "fitness_score": 0.87,
   "strategy": "score_child_prop"
 }
