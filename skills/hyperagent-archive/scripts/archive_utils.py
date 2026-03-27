@@ -80,7 +80,7 @@ def _write_metadata(output_dir: str, genid, metadata: dict):
 
 # --- Subcommands ---
 
-def cmd_add(args):
+def add(args):
     output_dir = args.output_dir
     metric = os.environ.get("HYPERAGENT_METRIC", "loss")
     entry = json.loads(args.entry_json)
@@ -112,7 +112,7 @@ def cmd_add(args):
     print(json.dumps({"status": "added", "genid": str(genid)}))
 
 
-def cmd_update_fitness(args):
+def update_fitness(args):
     output_dir = args.output_dir
     metric = os.environ.get("HYPERAGENT_METRIC", "loss")
     genid = args.genid
@@ -137,7 +137,7 @@ def cmd_update_fitness(args):
     print(json.dumps({"status": "updated", "genid": str(genid), "fitness_score": args.score}))
 
 
-def cmd_stats(args):
+def stats(args):
     output_dir = args.output_dir
     archive = _load_archive(output_dir)
     if not archive:
@@ -182,7 +182,7 @@ def cmd_stats(args):
     }))
 
 
-def cmd_best(args):
+def best(args):
     output_dir = args.output_dir
     archive = _load_archive(output_dir)
     all_meta = _read_all_metadata(output_dir)
@@ -202,7 +202,7 @@ def cmd_best(args):
     print(json.dumps(scored[:args.n]))
 
 
-def cmd_lineage(args):
+def lineage(args):
     output_dir = args.output_dir
     genid = args.genid
     try:
@@ -231,7 +231,7 @@ def cmd_lineage(args):
     print(json.dumps({"genid": str(args.genid), "lineage": chain}))
 
 
-def cmd_operator_stats(args):
+def operator_stats(args):
     output_dir = args.output_dir
     archive = _load_archive(output_dir)
     all_meta = _read_all_metadata(output_dir)
@@ -265,7 +265,7 @@ def cmd_operator_stats(args):
     print(json.dumps(result))
 
 
-def cmd_prune(args):
+def prune(args):
     output_dir = args.output_dir
     archive = _load_archive(output_dir)
     all_meta = _read_all_metadata(output_dir)
@@ -320,9 +320,9 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    {"add": cmd_add, "update-fitness": cmd_update_fitness, "stats": cmd_stats,
-     "best": cmd_best, "lineage": cmd_lineage, "operator-stats": cmd_operator_stats,
-     "prune": cmd_prune}[args.command](args)
+    {"add": add, "update-fitness": update_fitness, "stats": stats,
+     "best": best, "lineage": lineage, "operator-stats": operator_stats,
+     "prune": prune}[args.command](args)
 
 
 if __name__ == "__main__":
