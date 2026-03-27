@@ -34,7 +34,7 @@ def main():
     parser = argparse.ArgumentParser(description="Select parent from archive")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--strategy", default="score_child_prop",
-                        choices=["best", "latest", "random", "score_prop", "score_child_prop"])
+                        choices=["best", "latest", "random", "score_prop", "score_child_prop", "ucb"])
     parser.add_argument("--max-attempts", type=int, default=10,
                         help="Retry count if selection fails (mirrors generate_loop.py)")
     args = parser.parse_args()

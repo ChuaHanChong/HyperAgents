@@ -594,8 +594,119 @@ def select_parent(archive, output_dir, domains, method="best"):
         )
         return random.choices(commits, weights=probabilities)[0]
 
+    elif method == "ucb":
+        # UCB1 selection (Auer et al. 2002) — balanced explore/exploit via visit counts
+        commits = list(candidates.keys())
+        total_evals = max(sum(
+            get_node_metadata_key(output_dir, c, "eval_count") or 0 for c in commits
+        ), 1)
+
+        best_ucb = -float("inf")
+        tied = []
+        for c in commits:
+            vc = get_node_metadata_key(output_dir, c, "visit_count") or 0
+            vs = get_node_metadata_key(output_dir, c, "value_sum") or 0.0
+            if vc == 0:
+                ucb_val = float("inf")
+            else:
+                exploitation = vs / vc
+                exploration = 1.414 * math.sqrt(math.log(total_evals) / vc)
+                ucb_val = exploitation + exploration
+            if ucb_val > best_ucb:
+                best_ucb = ucb_val
+                tied = [c]
+            elif ucb_val == best_ucb:
+                tied.append(c)
+        return random.choice(tied)
+
     else:
         raise ValueError(f"Unknown method '{method}'")
+
+def _get_lineage(output_dir, genid):
+    """Walk parent pointers to build lineage [root, ..., genid]."""
+    chain = [genid]
+    seen = {genid}
+    current = genid
+    while True:
+        parent = get_parent_genid(output_dir, current)
+        if parent is None or parent in seen:
+            break
+        seen.add(parent)
+        chain.append(parent)
+        current = parent
+    chain.reverse()
+    return chain
+
+
+def _normalize_score_for_ucb(score, all_scores, lower_is_better=False):
+    """Min-max normalize to [0, 1], clamped. Returns 0.5 if all scores identical.
+
+    For lower-is-better metrics (loss), inverts so low score → high normalized value.
+    This ensures UCB exploitation always favors better-performing nodes.
+    """
+    if not all_scores:
+        return 0.5
+    lo, hi = min(all_scores), max(all_scores)
+    if hi == lo:
+        return 0.5
+    normalized = max(0.0, min(1.0, (score - lo) / (hi - lo)))
+    if lower_is_better:
+        normalized = 1.0 - normalized
+    return normalized
+
+
+def _read_lower_is_better_from_hyperagent_dir(output_dir):
+    """Read lower_is_better from pipeline-state.json relative to hyperagent dir."""
+    d = os.path.abspath(output_dir)
+    while d != os.path.dirname(d):
+        if os.path.basename(d) == "hyperagent":
+            exp_dir = os.path.dirname(d)
+            break
+        d = os.path.dirname(d)
+    else:
+        exp_dir = os.path.dirname(output_dir)
+    state_path = os.path.join(exp_dir, "pipeline-state.json")
+    if os.path.exists(state_path):
+        try:
+            with open(state_path) as f:
+                return json.load(f).get("user_choices", {}).get("lower_is_better", True)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return True
+
+
+def backpropagate_ucb(output_dir, genid, score, all_scores):
+    """Backpropagate a normalized score through the lineage.
+
+    Each ancestor: visit_count += 1, value_sum += normalized_score.
+    The evaluated node also: eval_count += 1.
+    Reads lower_is_better from pipeline state to handle metric direction.
+    """
+    lower_is_better = _read_lower_is_better_from_hyperagent_dir(output_dir)
+    norm_score = _normalize_score_for_ucb(score, all_scores, lower_is_better)
+    lineage = _get_lineage(output_dir, genid)
+    lineage_set = set(lineage)
+
+    for gid in lineage_set:
+        vc = get_node_metadata_key(output_dir, gid, "visit_count") or 0
+        vs = get_node_metadata_key(output_dir, gid, "value_sum") or 0.0
+        update = {
+            "visit_count": vc + 1,
+            "value_sum": vs + norm_score,
+        }
+        if gid == genid:
+            ec = get_node_metadata_key(output_dir, gid, "eval_count") or 0
+            update["eval_count"] = ec + 1
+        update_node_metadata(output_dir, gid, update)
+
+    return {
+        "status": "backpropagated",
+        "genid": genid,
+        "score": score,
+        "normalized_score": round(norm_score, 6),
+        "lineage": lineage,
+    }
+
 
 def get_latest_can_select_parent(archive, output_dir, trunc_genid=None):
     # Truncate archive

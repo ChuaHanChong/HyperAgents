@@ -26,6 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from utils.gl_utils import (
+    backpropagate_ucb,
     get_score,
     is_starting_node,
     load_archive_data,
@@ -265,6 +266,22 @@ def operator_stats(args):
     print(json.dumps(result))
 
 
+def backpropagate(args):
+    output_dir = args.output_dir
+    metric = os.environ.get("HYPERAGENT_METRIC", "loss")
+    archive = _load_archive(output_dir)
+
+    # Collect all fitness scores for normalization
+    all_scores = []
+    for gid in archive:
+        s = get_score("ml", output_dir, gid)
+        if s is not None:
+            all_scores.append(s)
+
+    result = backpropagate_ucb(output_dir, args.genid, args.score, all_scores)
+    print(json.dumps(result))
+
+
 def prune(args):
     output_dir = args.output_dir
     archive = _load_archive(output_dir)
@@ -315,6 +332,11 @@ def main():
     p_prune = subparsers.add_parser("prune")
     p_prune.add_argument("--output-dir", required=True)
 
+    p_bp = subparsers.add_parser("backpropagate")
+    p_bp.add_argument("--output-dir", required=True)
+    p_bp.add_argument("genid")
+    p_bp.add_argument("score", type=float)
+
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()
@@ -322,7 +344,7 @@ def main():
 
     {"add": add, "update-fitness": update_fitness, "stats": stats,
      "best": best, "lineage": lineage, "operator-stats": operator_stats,
-     "prune": prune}[args.command](args)
+     "prune": prune, "backpropagate": backpropagate}[args.command](args)
 
 
 if __name__ == "__main__":
