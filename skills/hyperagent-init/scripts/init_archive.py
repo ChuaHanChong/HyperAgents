@@ -87,6 +87,12 @@ def main():
         "parent_genid": None,
         "valid_parent": True,
         "run_full_eval": True,
+        "status": "evaluated",
+        "mutation_type": "initial",
+        "mutation_description": "Baseline initialization",
+        "code_branch": "master",
+        "prev_patch_files": [],
+        "curr_patch_files": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     _write_eval_report(output_dir, "initial", baseline_metrics)
