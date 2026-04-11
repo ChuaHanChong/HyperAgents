@@ -46,6 +46,16 @@ def _load_archive(output_dir: str) -> list:
 
 
 def _read_all_metadata(output_dir: str) -> dict:
+    """Return {genid: metadata} for every gen_<id>/ subdir.
+
+    Important: keys are stored in BOTH string and int form when numeric,
+    so that callers iterating `_load_archive()` (which may yield strings
+    like "1" or ints like 1 depending on how archive.jsonl was written)
+    can look up metadata without type-mismatch misses. The previous
+    implementation stored only the int form for numeric genids, causing
+    stats() and operator_stats() to see every lookup as empty and report
+    mutation_type as "none".
+    """
     result = {}
     if not os.path.isdir(output_dir):
         return result
@@ -56,12 +66,12 @@ def _read_all_metadata(output_dir: str) -> dict:
         if os.path.exists(meta_path):
             with open(meta_path) as f:
                 meta = json.load(f)
-            genid = name[4:]
+            raw = name[4:]
+            result[raw] = meta  # always keyed by the string form
             try:
-                genid = int(genid)
+                result[int(raw)] = meta  # also the int form if numeric
             except ValueError:
                 pass
-            result[genid] = meta
     return result
 
 
@@ -232,11 +242,77 @@ def lineage(args):
     print(json.dumps({"genid": str(args.genid), "lineage": chain}))
 
 
+def _resolve_baseline_for_operator_stats(output_dir: str, archive: list):
+    """Return (baseline_score, lower_is_better) for operator_stats comparisons.
+
+    Priority:
+      1. ``<exp_root>/results/baseline.json`` via HYPERAGENT_METRIC env var.
+         This is the ground truth — set at Phase 3 and checksum-protected.
+      2. Fall back to the first archive entry's eval report (legacy behaviour).
+
+    ``exp_root`` is resolved in this order so the experiment folder can live
+    anywhere on disk:
+      1. ``ML_OPT_EXP_ROOT`` env var (orchestrator may set explicitly when
+         the layout differs from convention)
+      2. Parent of ``output_dir`` (plugin convention: ``<exp_root>/hyperagent/``)
+
+    Metric direction is resolved in this order:
+      1. ``HYPERAGENT_METRIC_DIRECTION`` env var (``lower``/``higher``)
+      2. ``<exp_root>/pipeline-state.json`` ``user_choices.lower_is_better``
+      3. Fallback: ``lower`` (since ``loss`` is the default metric)
+    This lets the orchestrator pass direction through user_choices without
+    callers needing to set an extra env var.
+    """
+    metric = os.environ.get("HYPERAGENT_METRIC", "loss")
+    exp_root = os.environ.get("ML_OPT_EXP_ROOT") or os.path.dirname(
+        os.path.abspath(output_dir)
+    )
+
+    # Direction: env var wins, then pipeline-state.json, then default lower
+    direction_env = os.environ.get("HYPERAGENT_METRIC_DIRECTION")
+    lower_is_better = True  # default
+    if direction_env:
+        lower_is_better = direction_env.lower() != "higher"
+    else:
+        state_path = os.path.join(exp_root, "pipeline-state.json")
+        if os.path.isfile(state_path):
+            try:
+                with open(state_path) as f:
+                    state = json.load(f)
+                lib = (state.get("user_choices") or {}).get("lower_is_better")
+                if isinstance(lib, bool):
+                    lower_is_better = lib
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    # Primary source: baseline.json
+    baseline_json = os.path.join(exp_root, "results", "baseline.json")
+    if os.path.isfile(baseline_json):
+        try:
+            with open(baseline_json) as f:
+                data = json.load(f)
+            metrics = data.get("metrics") or {}
+            val = metrics.get(metric)
+            if isinstance(val, (int, float)):
+                return float(val), lower_is_better
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Legacy fallback: first archive entry
+    if archive:
+        legacy = get_score("ml", output_dir, archive[0])
+        if legacy is not None:
+            return legacy, lower_is_better
+    return None, lower_is_better
+
+
 def operator_stats(args):
     output_dir = args.output_dir
     archive = _load_archive(output_dir)
     all_meta = _read_all_metadata(output_dir)
-    baseline_score = get_score("ml", output_dir, archive[0]) if archive else 0.0
+    baseline_score, lower_is_better = _resolve_baseline_for_operator_stats(
+        output_dir, archive
+    )
 
     operators = {}
     for genid in archive:
@@ -250,8 +326,13 @@ def operator_stats(args):
         score = get_score("ml", output_dir, genid)
         if score is not None:
             operators[mt]["scores"].append(score)
-            if baseline_score is not None and score > baseline_score:
-                operators[mt]["improvements"] += 1
+            if baseline_score is not None:
+                improved = (
+                    score < baseline_score if lower_is_better
+                    else score > baseline_score
+                )
+                if improved:
+                    operators[mt]["improvements"] += 1
 
     result = {}
     for mt, data in operators.items():
