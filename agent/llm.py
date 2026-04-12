@@ -6,10 +6,10 @@ import json
 _CLAUDE_CODE_MODE = os.environ.get("HYPERAGENT_PROVIDER", "").lower() == "claude_code"
 
 if not _CLAUDE_CODE_MODE:
-    import backoff  # type: ignore[import-untyped]
-    import requests  # type: ignore[import-untyped]
-    import litellm  # type: ignore[import-untyped]
-    from dotenv import load_dotenv  # type: ignore[import-untyped]
+    import backoff
+    import requests
+    import litellm
+    from dotenv import load_dotenv
     load_dotenv()
 
 MAX_TOKENS = 16384
@@ -60,8 +60,8 @@ def _get_response_litellm(
 
     # Convert text to content, compatible with LITELLM API
     msg_history = [
-        {**m, "content": m.pop("text")} if "text" in m else m
-        for m in msg_history
+        {**msg, "content": msg.pop("text")} if "text" in msg else msg
+        for msg in msg_history
     ]
 
     new_msg_history = msg_history + [{"role": "user", "content": msg}]
@@ -95,8 +95,8 @@ def _get_response_litellm(
 
     # Convert content to text, compatible with MetaGen API
     new_msg_history = [
-        {**m, "text": m.pop("content")} if "content" in m else m
-        for m in new_msg_history
+        {**msg, "text": msg.pop("content")} if "content" in msg else msg
+        for msg in new_msg_history
     ]
 
     return response_text, new_msg_history, {}
