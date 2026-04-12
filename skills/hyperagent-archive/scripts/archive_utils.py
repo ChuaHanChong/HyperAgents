@@ -246,20 +246,20 @@ def _resolve_baseline_for_operator_stats(output_dir: str, archive: list):
     """Return (baseline_score, lower_is_better) for operator_stats comparisons.
 
     Priority:
-      1. ``<exp_root>/results/baseline.json`` via HYPERAGENT_METRIC env var.
+      1. `<exp_root>/results/baseline.json` via HYPERAGENT_METRIC env var.
          This is the ground truth — set at Phase 3 and checksum-protected.
       2. Fall back to the first archive entry's eval report (legacy behaviour).
 
-    ``exp_root`` is resolved in this order so the experiment folder can live
+    `exp_root` is resolved in this order so the experiment folder can live
     anywhere on disk:
-      1. ``ML_OPT_EXP_ROOT`` env var (orchestrator may set explicitly when
+      1. `ML_OPT_EXP_ROOT` env var (orchestrator may set explicitly when
          the layout differs from convention)
-      2. Parent of ``output_dir`` (plugin convention: ``<exp_root>/hyperagent/``)
+      2. Parent of `output_dir` (plugin convention: `<exp_root>/hyperagent/`)
 
     Metric direction is resolved in this order:
-      1. ``HYPERAGENT_METRIC_DIRECTION`` env var (``lower``/``higher``)
-      2. ``<exp_root>/pipeline-state.json`` ``user_choices.lower_is_better``
-      3. Fallback: ``lower`` (since ``loss`` is the default metric)
+      1. `HYPERAGENT_METRIC_DIRECTION` env var (`lower`/`higher`)
+      2. `<exp_root>/pipeline-state.json` `user_choices.lower_is_better`
+      3. Fallback: `lower` (since `loss` is the default metric)
     This lets the orchestrator pass direction through user_choices without
     callers needing to set an extra env var.
     """
